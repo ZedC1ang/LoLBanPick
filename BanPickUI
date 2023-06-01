@@ -1,0 +1,520 @@
+/** 问题记录
+ * 1、英雄列表界面只需要展示六行六列，即36个英雄即可，未显示的部分可以通过滑动滚轮查看
+ * 2、头像标签和原画标签应该放在不同的两行，而不是同一行
+ * 3、头像标签和原画标签应该提前留出两行五列的位置，而不是占据中间英雄标签的空间，当禁用和选择英雄时，只需填入对应头像标签和原画标签留出的位置即可
+ * 4、每个头像标签之间不要有空隙，应该是紧密挨在一起的；原画标签同样如此。
+ * 5、筛选位置和搜索英雄时，符合要求的英雄标签应该依次挨个地排列出来，其余的隐藏，而不是简单的按钮隐藏和显示
+ * 6、代码过于冗余且结构混乱，需要优化一下，最好能分出不同的类
+ * 7、UI界面不够美观，需要优化一下
+ */
+
+//导入相关的包
+import javax.sound.sampled.AudioSystem;
+import javax.sound.sampled.Clip;
+import javax.sound.sampled.LineUnavailableException;
+import javax.sound.sampled.UnsupportedAudioFileException;
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.sql.*;
+import java.util.ArrayList;
+import java.util.Scanner;
+
+//创建一个类，继承自JFrame，实现ActionListener接口
+public class BanPickUI extends JFrame implements ActionListener {
+
+    //定义一些常量，表示英雄的数量和位置的数量
+    private static final int HERO_NUM = 163;
+    private static final int POSITION_NUM = 5;
+
+    //定义一些组件，如面板，按钮，标签，文本框等
+    private JPanel panel1, panel2, panel3, panel4, panel5;
+    private JButton[] heroButtons;
+    private JButton[] positionButtons;
+    private JLabel blueTeamLabel, redTeamLabel;
+    private JTextField searchTextField;
+
+    //定义一些变量，如当前的阶段，当前的队伍等
+    private String stage;
+    private String team;
+    //定义一个变量，用来记录当前的Ban或Pick次数
+    private int count = 0;
+
+    //定义一个变量，用来存储数据库连接对象
+    private Connection conn;
+
+    //定义一个构造方法，初始化界面和组件
+    public BanPickUI() {
+        //设置窗口的标题，大小，位置和关闭方式
+        setTitle("英雄联盟BanPick小程序");
+        setSize(800, 600);
+        setLocationRelativeTo(null);
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+
+        //创建数据库连接对象，并调用createTable方法创建数据库表
+        try {
+            conn = DriverManager.getConnection("jdbc:mysql://localhost:3306/lol_bp", "root", "YUZHIBOzuozhu1");
+            createTable();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+
+        //创建面板，并设置布局为边界布局
+        panel1 = new JPanel();
+        panel1.setLayout(new BorderLayout());
+
+        //创建第二个面板，并设置布局为网格布局，用来放置英雄按钮
+        panel2 = new JPanel();
+        panel2.setLayout(new GridLayout(10, 10));
+
+        //创建英雄按钮数组，并初始化每个按钮，添加到第二个面板中
+        heroButtons = new JButton[HERO_NUM];
+        for (int i = 0; i < HERO_NUM; i++) {
+            //从数据库中查询英雄的名字和头像，并设置到英雄按钮上
+            try {
+                PreparedStatement ps = conn.prepareStatement("select name, icon from hero where id = ?");
+                ps.setInt(1, i + 1);
+                ResultSet rs = ps.executeQuery();
+                if (rs.next()) {
+                    String name = rs.getString("name");
+                    byte[] icon = rs.getBytes("icon");
+                    ImageIcon imageIcon = new ImageIcon(icon);
+                    heroButtons[i] = new JButton(name, imageIcon);
+                    heroButtons[i].addActionListener(this);
+                    panel2.add(heroButtons[i]);
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+        }
+
+        //将第二个面板添加到第一个面板的中间位置
+        panel1.add(panel2, BorderLayout.CENTER);
+
+        //创建第三个面板，并设置布局为流式布局，用来放置位置按钮和搜索文本框
+        panel3 = new JPanel();
+        panel3.setLayout(new FlowLayout());
+
+        //创建位置按钮数组，并初始化每个按钮，添加到第三个面板中
+        positionButtons = new JButton[POSITION_NUM];
+        String[] positions = {"上路", "打野", "中路", "下路", "辅助"};
+        for (int i = 0; i < POSITION_NUM; i++) {
+            positionButtons[i] = new JButton(positions[i]);
+            positionButtons[i].addActionListener(this);
+            panel3.add(positionButtons[i]);
+        }
+
+        //创建搜索文本框，并添加到第三个面板中
+        searchTextField = new JTextField(10);
+        searchTextField.addActionListener(this);
+        panel3.add(searchTextField);
+
+        //将第三个面板添加到第一个面板的北边位置
+        panel1.add(panel3, BorderLayout.NORTH);
+
+        //创建第四个面板，并设置布局为网格布局，用来放置蓝队标签
+        panel4 = new JPanel();
+        panel4.setLayout(new GridLayout(1, 1));
+
+        //创建蓝队标签，并添加到第四个面板中
+        blueTeamLabel = new JLabel("蓝队：");
+
+        //将第四个面板添加到第一个面板的西边位置
+        panel1.add(panel4, BorderLayout.WEST);
+
+        //创建第五个面板，并设置布局为网格布局，用来放置红队标签
+        panel5 = new JPanel();
+        panel5.setLayout(new GridLayout(1, 1));
+
+        //创建红队标签，并添加到第五个面板中
+        redTeamLabel = new JLabel("红队：");
+
+        //将第五个面板添加到第一个面板的东边位置
+        panel1.add(panel5, BorderLayout.EAST);
+
+        //将第一个面板添加到窗口中
+        add(panel1);
+
+        //初始化一些变量的值
+        stage = "Ban";
+        team = "Blue";
+
+        //设置窗口可见
+        setVisible(true);
+    }
+
+    //定义一个方法，用来创建数据库表，并导入英雄的数据
+    public void createTable() {
+        try {
+            Statement stmt = conn.createStatement();
+
+            //如果数据库中已经存在hero表，就删除它
+            stmt.executeUpdate("drop table if exists hero");
+
+            //创建hero表，包含id（主键），name（英雄名字），icon（英雄头像），position（英雄位置），artwork（英雄原画），pick（英雄选用语音），ban（英雄禁用语音）等字段
+            stmt.executeUpdate("create table hero(id int AUTO_INCREMENT primary key, name varchar(20), icon longblob, position varchar(10), artwork longblob, pick longblob, ban longblob)");
+
+            //从文件夹中读取英雄的数据，并插入到hero表中
+            for (int i = 0; i < HERO_NUM; i++) {
+                PreparedStatement ps = conn.prepareStatement("insert into hero values(?, ?, ?, ?, ?, ?, ?)");
+                ps.setInt(1, i + 1); //id从1开始递增
+
+                //从文件夹中读取英雄的名字，并设置到name字段
+                String namePath = "G:\\学校课程\\项目实训\\templates" + "/name.txt"; //name为你爬取的文件夹下的名字文件
+                File nameFile = new File(namePath);
+                Scanner scanner = new Scanner(nameFile);
+                ArrayList<String> nameList = new ArrayList<>(); //创建一个ArrayList对象
+                while (scanner.hasNextLine()) {
+                    nameList.add(scanner.nextLine()); //添加每一行的内容到列表中
+                }
+                scanner.close();
+                String name = nameList.get(i); //根据索引获取对应的名字
+                ps.setString(2, name);
+
+                //从文件夹中读取英雄的头像，并设置到icon字段
+                String iconPath = "G:\\学校课程\\项目实训\\templates\\pictures\\bannedImage" + "/ban (" + (i + 1) + ").png"; //icon为你爬取的文件夹下的头像文件
+                File iconFile = new File(iconPath);
+                FileInputStream iconFis = new FileInputStream(iconFile);
+                ps.setBinaryStream(3, iconFis, (int) iconFile.length());
+
+                //从文件夹中读取英雄的位置，并设置到position字段
+                String positionPath = "G:\\学校课程\\项目实训\\templates" + "/position.txt"; //position为你爬取的文件夹下的位置文件
+                File positionFile = new File(positionPath);
+                scanner = new Scanner(positionFile);
+                ArrayList<String> positionList = new ArrayList<>(); //创建一个ArrayList对象
+                while (scanner.hasNextLine()) {
+                    positionList.add(scanner.nextLine()); //添加每一行的内容到列表中
+                }
+                scanner.close();
+                String position = positionList.get(i); //根据索引获取对应的位置
+                ps.setString(4, position);
+
+                //从文件夹中读取英雄的原画，并设置到artwork字段
+                String artworkPath = "G:\\学校课程\\项目实训\\templates\\pictures\\pickedImage" + "/pick (" + (i + 1) + ").jpg"; //artwork为你爬取的文件夹下的原画文件
+                File artworkFile = new File(artworkPath);
+                FileInputStream artworkFis = new FileInputStream(artworkFile);
+                ps.setBinaryStream(5, artworkFis, (int) artworkFile.length());
+
+                //从文件夹中读取英雄的选用语音，并设置到pick字段
+                String pickPath = "G:\\学校课程\\项目实训\\templates\\voice\\pickAudio" + "/pick (" + (i + 1) + ").wav"; //pick为你爬取的文件夹下的选用语音文件
+                File pickFile = new File(pickPath);
+                FileInputStream pickFis = new FileInputStream(pickFile);
+                ps.setBinaryStream(6, pickFis, (int) pickFile.length());
+
+                //从文件夹中读取英雄的禁用语音，并设置到ban字段
+                String banPath = "G:\\学校课程\\项目实训\\templates\\voice\\banAudio" + "/ban (" + (i + 1) + ").wav"; //ban为你爬取的文件夹下的禁用语音文件
+                File banFile = new File(banPath);
+                FileInputStream banFis = new FileInputStream(banFile);
+                ps.setBinaryStream(7, banFis, (int) banFile.length());
+
+                ps.executeUpdate(); //执行插入语句
+
+                iconFis.close(); //关闭输入流
+                artworkFis.close();
+                pickFis.close();
+                banFis.close();
+            }
+        } catch (SQLException | IOException e) {
+            e.printStackTrace();
+        }
+
+    }
+
+
+    //定义一个方法，用来切换阶段，从Ban到Pick或从Pick到Ban
+    public void switchStage() {
+        if (stage.equals("Ban")) {
+            stage = "Pick";
+        } else {
+            stage = "Ban";
+        }
+    }
+
+    //定义一个方法，用来切换队伍，从Blue到Red或从Red到Blue
+    public void switchTeam() {
+        if (team.equals("Blue")) {
+            team = "Red";
+        } else {
+            team = "Blue";
+        }
+    }
+
+    //定义一个方法，用来检查是否有重复的英雄被禁用或选择
+    public boolean checkDuplicate(String heroName) {
+        //获取蓝队和红队标签的文本
+        String blueTeamText = blueTeamLabel.getText();
+        String redTeamText = redTeamLabel.getText();
+
+        //如果英雄名字出现在蓝队或红队的文本中，就返回true，表示有重复
+        if (blueTeamText.contains(heroName) || redTeamText.contains(heroName)) {
+            return true;
+        } else {
+            //否则返回false，表示没有重复
+            return false;
+        }
+    }
+
+    //重写actionPerformed方法，添加检查重复的逻辑
+    @Override
+    public void actionPerformed(ActionEvent e) {
+        //获取事件源对象
+        Object source = e.getSource();
+
+        //如果事件源是英雄按钮之一
+        if (source instanceof JButton) {
+            JButton button = (JButton) source;
+            for (int i = 0; i < HERO_NUM; i++) {
+                if (button == heroButtons[i]) {
+                    //获取英雄按钮的文本，即英雄的名字
+                    String heroName = button.getText();
+
+                    //检查是否有重复的英雄被禁用或选择
+                    boolean duplicate = checkDuplicate(heroName);
+
+                    //如果有重复，就弹出一个提示框，告诉用户不能选择这个英雄，并返回
+                    if (duplicate) {
+                        JOptionPane.showMessageDialog(this, "这个英雄已经被禁用或选择了，请选择其他英雄。", "提示", JOptionPane.WARNING_MESSAGE);
+                        return;
+                    }
+
+                    //如果没有重复，就继续之前的逻辑
+                    //如果当前是Ban阶段，就禁用这个英雄按钮，并更新队伍标签的文本
+                    if (stage.equals("Ban")) {
+                        button.setEnabled(false);
+                        //从数据库中查询英雄的头像和禁用语音，并设置到队伍标签上
+                        try {
+                            PreparedStatement ps = conn.prepareStatement("select icon, ban from hero where name = ?");
+                            ps.setString(1, heroName);
+                            ResultSet rs = ps.executeQuery();
+                            if (rs.next()) {
+                                byte[] icon = rs.getBytes("icon");
+                                byte[] ban = rs.getBytes("ban");
+                                ImageIcon imageIcon = new ImageIcon(icon);
+                                JLabel label = new JLabel(imageIcon);
+                                label.setToolTipText(heroName); //设置鼠标悬停时显示英雄名字
+                                if (team.equals("Blue")) {
+                                    panel4.add(label); //将头像标签添加到蓝队面板中
+                                    panel4.revalidate(); //重新布局蓝队面板
+                                    playSound(ban); //播放禁用语音
+                                    updateRound();
+                                } else {
+                                    panel5.add(label); //将头像标签添加到红队面板中
+                                    panel5.revalidate(); //重新布局红队面板
+                                    playSound(ban); //播放禁用语音
+                                    updateRound();
+                                }
+                            }
+                        } catch (SQLException e1) {
+                            e1.printStackTrace();
+                        }
+                    }
+
+                    //如果当前是Pick阶段，就禁用这个英雄按钮，并更新队伍标签的文本
+                    else if (stage.equals("Pick")) {
+                        button.setEnabled(false);
+
+                        //从数据库中查询英雄的原画和选用语音，并设置到队伍标签上
+                        try {
+                            PreparedStatement ps = conn.prepareStatement("select artwork, pick from hero where name = ?");
+                            ps.setString(1, heroName);
+                            ResultSet rs = ps.executeQuery();
+                            if (rs.next()) {
+                                byte[] artwork = rs.getBytes("artwork");
+                                byte[] pick = rs.getBytes("pick");
+                                ImageIcon imageIcon = new ImageIcon(artwork);
+                                JLabel label = new JLabel(imageIcon);
+                                label.setToolTipText(heroName); //设置鼠标悬停时显示英雄名字
+                                if (team.equals("Blue")) {
+                                    panel4.add(label); //将原画标签添加到蓝队面板中
+                                    panel4.revalidate(); //重新布局蓝队面板
+                                    playSound(pick); //播放选用语音
+                                    updateRound();
+                                } else {
+                                    panel5.add(label); //将原画标签添加到红队面板中
+                                    panel5.revalidate(); //重新布局红队面板
+                                    playSound(pick); //播放选用语音
+                                    updateRound();
+                                }
+                            }
+                        } catch (SQLException e1) {
+                            e1.printStackTrace();
+                        }
+                    }
+                }
+            }
+        }
+
+        //如果事件源是位置按钮之一
+        if (source instanceof JButton) {
+            JButton button = (JButton) source;
+            for (int i = 0; i < POSITION_NUM; i++) {
+                if (button == positionButtons[i]) {
+                    //获取位置按钮的文本，即位置的名字
+                    String positionName = button.getText();
+
+                    //根据位置的名字，从数据库中查询出对应位置的英雄，并只显示这些英雄的按钮，隐藏其他英雄的按钮
+                    try {
+                        PreparedStatement ps = conn.prepareStatement("select id from hero where position = ?");
+                        ps.setString(1, positionName);
+                        ResultSet rs = ps.executeQuery();
+                        for (int j = 0; j < HERO_NUM; j++) {
+                            heroButtons[j].setVisible(false);
+                        }
+                        while (rs.next()) {
+                            int id = rs.getInt("id");
+                            heroButtons[id - 1].setVisible(true); //id从1开始，而数组下标从0开始，所以要减1
+                        }
+
+                    } catch (SQLException e1) {
+                        e1.printStackTrace();
+                    }
+                }
+            }
+        }
+
+        //如果事件源是搜索文本框
+        if (source instanceof JTextField) {
+            JTextField textField = (JTextField) source;
+            //获取搜索文本框的文本，即搜索的关键字
+            String keyword = textField.getText();
+
+            //根据搜索的关键字，从数据库中查询出包含这个关键字的英雄，并只显示这些英雄的按钮，隐藏其他英雄的按钮
+            try {
+                PreparedStatement ps = conn.prepareStatement("select id from hero where name like ?");
+                ps.setString(1, "%" + keyword + "%");
+                ResultSet rs = ps.executeQuery();
+                while (rs.next()) {
+                    int id = rs.getInt("id");
+                    heroButtons[id - 1].setVisible(true); //id从1开始，而数组下标从0开始，所以要减1
+                }
+                for (int i = 0; i < HERO_NUM; i++) {
+                    if (!heroButtons[i].getText().contains(keyword)) {
+                        heroButtons[i].setVisible(false);
+                    }
+                }
+            } catch (SQLException e1) {
+                e1.printStackTrace();
+            }
+        }
+
+    }
+
+    //定义一个方法，用来播放音频文件
+    public void playSound(byte[] sound) {
+        try {
+            Clip clip = AudioSystem.getClip(); //创建一个Clip对象
+            clip.open(AudioSystem.getAudioInputStream(new ByteArrayInputStream(sound))); //打开音频输入流并加载音频数据
+            clip.start(); //开始播放音频
+        } catch (LineUnavailableException | IOException | UnsupportedAudioFileException e) {
+            e.printStackTrace();
+        }
+
+    }
+
+    public void updateRound() {
+        //在actionPerformed方法中，每次Ban或Pick后，增加count的值
+        count++;
+
+        //如果count等于1，表示蓝队第一轮已经Ban了1个英雄，就切换到红队
+        if (count == 1) {
+            switchTeam();
+        }
+
+        //如果count等于2，表示红队第一轮已经Ban了1个英雄，就切换到蓝队
+        if (count == 2) {
+            switchTeam();
+        }
+
+        //如果count等于3，表示蓝队第一轮已经Ban了2个英雄，就切换到红队
+        if (count == 3) {
+            switchTeam();
+        }
+
+        //如果count等于4，表示红队第一轮已经Ban了2个英雄，就切换到蓝队
+        if (count == 4) {
+            switchTeam();
+        }
+
+        //如果count等于5，表示蓝队第一轮已经Ban了3个英雄，就切换到红队
+        if (count == 5) {
+            switchTeam();
+        }
+
+        //如果count等于6，表示红队第一轮已经Ban了3个英雄，就切换到Pick阶段，并切换到蓝队
+        if (count == 6) {
+            switchStage();
+            switchTeam();
+        }
+
+        //如果count等于7，表示蓝队第一轮已经Pick了1个英雄，就切换到红队
+        if (count == 7) {
+            switchTeam();
+        }
+
+        //如果count等于9，表示红队第一轮已经Pick了2个英雄，就切换到蓝队
+        if (count == 9) {
+            switchTeam();
+        }
+
+        //如果count等于11，表示蓝队第一轮已经Pick了3个英雄，就切换到红队
+        if (count == 11) {
+            switchTeam();
+        }
+
+        //如果count等于12，表示红队第一轮已经Pick了3个英雄，就切换到Ban阶段，不用切换队伍
+        if (count == 12) {
+            switchStage();
+        }
+
+        //如果count等于13，表示红队第二轮已经Ban了1个英雄，就切换到蓝队
+        if (count == 13) {
+            switchTeam();
+        }
+
+        //如果count等于14，表示蓝队第二轮已经Ban了1个英雄，就切换到红队
+        if (count == 14) {
+            switchTeam();
+        }
+
+        //如果count等于15，表示红队第二轮已经Ban了2个英雄，就切换到蓝队
+        if (count == 15) {
+            switchTeam();
+        }
+
+        //如果count等于16，表示蓝队第二轮已经Ban了2个英雄，就切换到Pick阶段，并切换到红队
+        if (count == 16) {
+            switchStage();
+            switchTeam();
+        }
+
+        //如果count等于17，表示红队第二轮已经Pick了1个英雄，就切换到蓝队
+        if (count == 17) {
+            switchTeam();
+        }
+
+        //如果count等于19，表示蓝队第二轮已经Pick了2个英雄，就切换到红队
+        if (count == 19) {
+            switchTeam();
+        }
+
+        //如果count等于20，表示红队第二轮已经Pick了2个英雄，整个BP环节结束。
+        if (count == 20) {
+            //弹出一个提示框告诉用户BP环节结束，并显示双方选择的阵容
+            JOptionPane.showMessageDialog(this, "BP环节结束！\n"
+                            + blueTeamLabel.getText() + "\n"
+                            + redTeamLabel.getText(), "提示",
+                    JOptionPane.INFORMATION_MESSAGE);
+        }
+    }
+
+    //定义一个主方法，用来创建BanPickUI对象
+    public static void main(String[] args) {
+        new BanPickUI();
+    }
+}
+
